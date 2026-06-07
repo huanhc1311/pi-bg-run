@@ -59,12 +59,12 @@ describe("Notifier", () => {
     expect(msg).toContain("killed");
   });
 
-  it("uses deliverAs followUp with triggerTurn true", () => {
+  it("uses deliverAs steer with triggerTurn true", () => {
     const notifier = createNotifier();
     notifier.notify(completedJob, mockPi);
     vi.advanceTimersByTime(100);
     const options = mockPi.sendMessage.mock.calls[0][1];
-    expect(options.deliverAs).toBe("followUp");
+    expect(options.deliverAs).toBe("steer");
     expect(options.triggerTurn).toBe(true);
   });
 });

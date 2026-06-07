@@ -2,7 +2,7 @@ import type { BgRunConfig, BgRunUserSettings } from "./types.js";
 
 const DEFAULTS: Omit<BgRunConfig, "runDir"> = {
   maxConcurrentJobs: 10,
-  completedTtlMs: 300_000,
+  completedTtlMs: 7 * 24 * 3600_000, // 7 days
   widgetRefreshMs: 3_000,
   killTimeoutMs: 10_000,
 };

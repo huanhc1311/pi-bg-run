@@ -7,7 +7,7 @@ describe("loadConfig", () => {
     const config = loadConfig(undefined, "/tmp/test-session");
     expect(config).toEqual({
       maxConcurrentJobs: 10,
-      completedTtlMs: 300_000,
+      completedTtlMs: 7 * 24 * 3600_000,
       widgetRefreshMs: 3_000,
       killTimeoutMs: 10_000,
       runDir: "/tmp/test-session",
@@ -19,7 +19,7 @@ describe("loadConfig", () => {
     const config = loadConfig(user, "/tmp/test-session");
     expect(config.maxConcurrentJobs).toBe(5);
     expect(config.killTimeoutMs).toBe(20_000);
-    expect(config.completedTtlMs).toBe(300_000);
+    expect(config.completedTtlMs).toBe(7 * 24 * 3600_000);
   });
 
   it("uses defaults for undefined user settings keys", () => {

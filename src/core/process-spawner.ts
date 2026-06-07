@@ -28,7 +28,6 @@ export function createProcessSpawner() {
         stdio: ["ignore", logFd, logFd],
       });
       const pid = child.pid!;
-      child.unref();
       fs.closeSync(logFd);
       return { pid, logPath, child };
     } catch (err) {

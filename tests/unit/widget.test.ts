@@ -25,26 +25,82 @@ describe("Widget", () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("renders running job with braille spinner character", () => {
+  it("renders running jobs as single line with spinner", () => {
     const widget = createWidget(300_000);
     const ctx = mockContext();
     widget.refresh([baseJob], ctx);
-    expect(ctx.ui.setWidget).toHaveBeenCalled();
-    const lines: string[] = ctx.ui.setWidget.mock.calls[0][1];
-    const spinnerChars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
-    const jobLine = lines.find((l: string) => spinnerChars.some(c => l.includes(c)));
-    expect(jobLine).toBeTruthy();
-    expect(jobLine).toContain("build");
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("bg-run", [expect.any(String)]);
+    const line: string = ctx.ui.setWidget.mock.calls[0][1][0];
+    const spinnerChars = ["✶", "✷", "✵", "✴", "✳", "✲", "✱", "✺"];
+    expect(spinnerChars.some(c => line.includes(c))).toBe(true);
+    expect(line).toContain("build");
+    expect(line).toContain("bg:");
   });
 
-  it("renders completed job with static ✅ icon", () => {
+  it("renders completed jobs as collapsed summary", () => {
     const widget = createWidget(300_000);
     const ctx = mockContext();
     const completedJob = { ...baseJob, status: "completed" as const, exitCode: 0, endedAt: Date.now() };
     widget.refresh([completedJob], ctx);
-    const lines: string[] = ctx.ui.setWidget.mock.calls[0][1];
-    const doneLine = lines.find((l: string) => l.includes("✅"));
-    expect(doneLine).toBeTruthy();
+    const line: string = ctx.ui.setWidget.mock.calls[0][1][0];
+    expect(line).toContain("bg:");
+    expect(line).toContain("1 done");
+    expect(line).not.toContain("✶");
+  });
+
+  it("shows running + completed summary together", () => {
+    const widget = createWidget(300_000);
+    const ctx = mockContext();
+    const completedJob = { ...baseJob, status: "completed" as const, exitCode: 0, endedAt: Date.now() };
+    const runningJob = { ...baseJob, id: "bg_other", label: "train" };
+    widget.refresh([runningJob, completedJob], ctx);
+    const line: string = ctx.ui.setWidget.mock.calls[0][1][0];
+    expect(line).toContain("train");
+    expect(line).toContain("1 done");
+  });
+
+  it("counts multiple completed by status", () => {
+    const widget = createWidget(300_000);
+    const ctx = mockContext();
+    const jobs: Job[] = [
+      { ...baseJob, id: "bg_a", status: "completed", exitCode: 0, endedAt: Date.now() },
+      { ...baseJob, id: "bg_b", status: "completed", exitCode: 0, endedAt: Date.now() },
+      { ...baseJob, id: "bg_c", status: "failed", exitCode: 1, endedAt: Date.now() },
+      { ...baseJob, id: "bg_d", status: "killed", exitCode: null, endedAt: Date.now() },
+    ];
+    widget.refresh(jobs, ctx);
+    const line: string = ctx.ui.setWidget.mock.calls[0][1][0];
+    expect(line).toContain("2 done");
+    expect(line).toContain("1 failed");
+    expect(line).toContain("1 killed");
+  });
+
+  it("ignores old completed jobs outside TTL", () => {
+    const widget = createWidget(5_000);
+    const ctx = mockContext();
+    const oldJob: Job = {
+      ...baseJob, id: "bg_old", status: "completed", exitCode: 0,
+      endedAt: Date.now() - 10_000,
+    };
+    widget.refresh([oldJob], ctx);
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("bg-run", undefined);
+  });
+
+  it("auto-dismisses completed summary after SUMMARY_TTL", () => {
+    const widget = createWidget(300_000);
+    const ctx = mockContext();
+    const endedAt = Date.now();
+    const completedJob = { ...baseJob, status: "completed" as const, exitCode: 0, endedAt };
+    widget.refresh([completedJob], ctx);
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("bg-run", [expect.any(String)]);
+
+    vi.advanceTimersByTime(9_999);
+    widget.refresh([{ ...completedJob, endedAt }], ctx);
+    expect(ctx.ui.setWidget).not.toHaveBeenCalledWith("bg-run", undefined);
+
+    vi.advanceTimersByTime(2);
+    widget.refresh([{ ...completedJob, endedAt }], ctx);
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("bg-run", undefined);
   });
 
   it("clears widget when no jobs to show", () => {
@@ -54,22 +110,11 @@ describe("Widget", () => {
     expect(ctx.ui.setWidget).toHaveBeenCalledWith("bg-run", undefined);
   });
 
-  it("staggered spinners — different jobs show different frames", () => {
-    const widget = createWidget(300_000);
-    const ctx = mockContext();
-    const job2 = { ...baseJob, id: "bg_other", label: "test", startedAt: baseJob.startedAt + 2000 };
-    widget.refresh([baseJob, job2], ctx);
-    const lines: string[] = ctx.ui.setWidget.mock.calls[0][1];
-    const spinnerChars = new Set(["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]);
-    const found = lines.filter((l: string) => [...spinnerChars].some(c => l.includes(c)));
-    expect(found.length).toBe(2);
-  });
-
   it("updates status bar with running count", () => {
     const widget = createWidget(300_000);
     const ctx = mockContext();
     widget.refresh([baseJob], ctx);
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith("bg-run", "🏃 1 bg job");
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("bg-run", "1 bg job");
   });
 
   it("clears status bar when no running jobs", () => {
@@ -84,7 +129,6 @@ describe("Widget", () => {
     const ctx = mockContext();
     const getJobs = () => [baseJob];
     widget.start(getJobs, ctx);
-    // Should have called refresh at least once (initial tick)
     expect(ctx.ui.setWidget).toHaveBeenCalled();
     widget.stop();
   });

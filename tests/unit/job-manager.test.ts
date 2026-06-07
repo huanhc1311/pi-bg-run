@@ -5,12 +5,12 @@ import type { Job } from "../../src/types.js";
 function mockDeps() {
   return {
     spawner: {
-      spawn: vi.fn(() => ({ pid: 1234, logPath: "/tmp/bg_test.log", child: { on: vi.fn() } })),
+      spawn: vi.fn(() => ({ pid: 1234, logPath: "/tmp/bg_test.log", child: { on: vi.fn(), unref: vi.fn() } })),
       generateId: vi.fn(() => "bg_testid1"),
     },
     monitor: { watch: vi.fn(() => vi.fn()), clear: vi.fn(), clearAll: vi.fn() },
     killer: { kill: vi.fn(async () => {}), sendSignal: vi.fn() },
-    persistence: { save: vi.fn(), load: vi.fn(() => [] as Job[]), recover: vi.fn((jobs: Job[]) => jobs) },
+    persistence: { save: vi.fn(), load: vi.fn(() => [] as Job[]), recover: vi.fn((jobs: Job[]) => jobs), cleanLogs: vi.fn(() => []), cleanDir: vi.fn(), gc: vi.fn() },
     notifier: { notify: vi.fn(), flush: vi.fn() },
     widget: { refresh: vi.fn(), start: vi.fn(), stop: vi.fn() },
     config: { maxConcurrentJobs: 10, completedTtlMs: 300_000, widgetRefreshMs: 3000, killTimeoutMs: 10000, runDir: "/tmp/test-run" },
@@ -27,6 +27,12 @@ describe("JobManager", () => {
     expect(deps.spawner.spawn).toHaveBeenCalledWith("echo hi", "/tmp/test-run");
     expect(deps.persistence.save).toHaveBeenCalled();
     expect(deps.monitor.watch).toHaveBeenCalled();
+    // Verify close/error handlers registered (unref deferred to handlers)
+    const child = result.job as any;
+    const spawnResult = deps.spawner.spawn.mock.results[0].value;
+    expect(spawnResult.child.on).toHaveBeenCalledWith("close", expect.any(Function));
+    expect(spawnResult.child.on).toHaveBeenCalledWith("error", expect.any(Function));
+    expect(spawnResult.child.unref).not.toHaveBeenCalled();
   });
 
   it("spawn rejects empty command", () => {
@@ -92,6 +98,24 @@ describe("JobManager", () => {
     const job = Array.from(mgr.jobs.values())[0];
     expect(job.notifiedAt).toBeGreaterThan(0);
     expect(deps.persistence.save).toHaveBeenCalledTimes(4); // init + spawn + exit + post-notify
+  });
+
+  it("onExit via child close handler unreffed child", () => {
+    const deps = mockDeps();
+    const mgr = createJobManager(deps as any);
+    const mockPi = { sendMessage: vi.fn() };
+    const mockCtx = { hasUI: false, ui: { theme: { fg: (_: string, t: string) => t }, setWidget: vi.fn(), setStatus: vi.fn() } };
+    mgr.init(mockPi, mockCtx);
+    mgr.spawn("cmd", "test");
+    // Get the close handler registered on child
+    const spawnResult = deps.spawner.spawn.mock.results[0].value;
+    const closeHandler = spawnResult.child.on.mock.calls.find((c: string[]) => c[0] === "close")?.[1] as (code: number | null) => void;
+    closeHandler(0);
+    // Child should be unreffed after close fires
+    expect(spawnResult.child.unref).toHaveBeenCalled();
+    const job = Array.from(mgr.jobs.values())[0];
+    expect(job.status).toBe("completed");
+    expect(job.exitCode).toBe(0);
   });
 
   it("onExit marks killed jobs correctly", () => {

@@ -28,6 +28,7 @@ describe("ProcessSpawner", () => {
     expect(result.pid).toBe(12345);
     expect(result.logPath).toMatch(/\/tmp\/run\/bg_.*\.log/);
     expect(result.child).toBe(mockChild);
+    expect(mockChild.unref).not.toHaveBeenCalled();
   });
 
   it("throws with descriptive error when spawn fails", () => {

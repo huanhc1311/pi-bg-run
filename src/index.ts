@@ -15,13 +15,24 @@ import { createBgPanelComponent } from "./ui/panel.js";
 
 const BASE_RUN_DIR = "/tmp/bg-run";
 
-/** Per-session JobManager registry */
-const sessionManagers = new Map<string, ReturnType<typeof createJobManager>>();
+/** Hash a project path into a short stable directory name */
+function hashPath(p: string): string {
+  let h = 0;
+  for (let i = 0; i < p.length; i++) h = ((h << 5) - h + p.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36); // unsigned base36
+}
+
+/** Per-project JobManager registry (keyed by project path hash) */
+const projectManagers = new Map<string, ReturnType<typeof createJobManager>>();
+/** Track which session uses which project */
+const sessionProject = new Map<string, string>();
 
 export default function (pi: ExtensionAPI) {
   function getManager(ctx: any): ReturnType<typeof createJobManager> | undefined {
     const sid = ctx.sessionManager?.getSessionId();
-    return sid ? sessionManagers.get(sid) : undefined;
+    if (!sid) return undefined;
+    const projectKey = sessionProject.get(sid);
+    return projectKey ? projectManagers.get(projectKey) : undefined;
   }
 
   function requireManager(ctx: any): ReturnType<typeof createJobManager> {
@@ -58,11 +69,19 @@ export default function (pi: ExtensionAPI) {
     const sid = ctx.sessionManager?.getSessionId();
     if (!sid) return;
 
-    const prev = sessionManagers.get(sid);
-    if (prev) prev.shutdown();
+    const cwd = ctx.cwd || process.cwd();
+    const projectKey = hashPath(cwd);
+    sessionProject.set(sid, projectKey);
+
+    // Reuse existing manager for this project (shared across sessions)
+    const existing = projectManagers.get(projectKey);
+    if (existing) {
+      existing.attach(pi, ctx);
+      return;
+    }
 
     const settings = ctx.settings?.bgRun;
-    const runDir = path.join(BASE_RUN_DIR, sid);
+    const runDir = path.join(BASE_RUN_DIR, projectKey);
     const config = loadConfig(settings, runDir);
 
     const spawner = createProcessSpawner();
@@ -74,16 +93,18 @@ export default function (pi: ExtensionAPI) {
 
     const manager = createJobManager({ spawner, monitor, killer, persistence, notifier, widget, config });
     manager.init(pi, ctx);
-    sessionManagers.set(sid, manager);
+    projectManagers.set(projectKey, manager);
   });
 
   pi.on("session_shutdown", async (_event: any, ctx: any) => {
     const sid = ctx.sessionManager?.getSessionId();
     if (!sid) return;
-    const manager = sessionManagers.get(sid);
+    const projectKey = sessionProject.get(sid);
+    sessionProject.delete(sid);
+    if (!projectKey) return;
+    const manager = projectManagers.get(projectKey);
     if (manager) {
-      manager.shutdown();
-      sessionManagers.delete(sid);
+      manager.detach(ctx);
     }
   });
 }

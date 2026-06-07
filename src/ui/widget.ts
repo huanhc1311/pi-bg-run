@@ -1,8 +1,10 @@
 import type { Job } from "../types.js";
 
-export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+export const SPINNER_FRAMES = ["✶", "✷", "✵", "✴", "✳", "✲", "✱", "✺"];
+
 export const ACTIVE_REFRESH_MS = 500;
 const IDLE_REFRESH_MS = 3000;
+const SUMMARY_TTL_MS = 10_000;
 
 function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -33,29 +35,51 @@ export function createWidget(completedTtlMs: number) {
 
   function refresh(jobs: Job[], ctx: WidgetContext): void {
     try { if (!ctx.hasUI) return; } catch { return; }
-    const running = jobs.filter(j => j.status === "running");
-    const recent = jobs.filter(j => j.status !== "running" && j.endedAt && Date.now() - j.endedAt < completedTtlMs);
 
-    if (running.length === 0 && recent.length === 0) {
+    const now = Date.now();
+    const running = jobs.filter(j => j.status === "running");
+
+    // Only count completed jobs within TTL window — old jobs are irrelevant
+    const recent = jobs.filter(j =>
+      j.status !== "running" && j.endedAt && now - j.endedAt < completedTtlMs
+    );
+    const doneCount = recent.filter(j => j.status === "completed").length;
+    const failCount = recent.filter(j => j.status === "failed").length;
+    const killCount = recent.filter(j => j.status === "killed").length;
+    const hasRecent = doneCount + failCount + killCount > 0;
+
+    // Auto-dismiss: no running jobs and no recent completed jobs
+    const lastEndedAt = recent.length > 0
+      ? Math.max(...recent.map(j => j.endedAt!))
+      : 0;
+
+    if (running.length === 0 && (!hasRecent || now - lastEndedAt >= SUMMARY_TTL_MS)) {
       ctx.ui.setWidget("bg-run", undefined);
       ctx.ui.setStatus("bg-run", undefined);
       return;
     }
 
     const th = ctx.ui.theme;
-    const lines: string[] = [th.fg("accent", " bg-run ")];
-    for (const j of running) {
-      const spinner = getSpinnerFrame(j);
-      lines.push(` ${th.fg("warning", spinner)} ${th.fg("text", j.label.slice(0, 25).padEnd(25))} ${th.fg("dim", formatDuration(Date.now() - j.startedAt))}`);
+
+    if (running.length > 0) {
+      // Active: spinner + running details + completed summary
+      const spinner = th.fg("warning", getSpinnerFrame(running[0]));
+      const runningParts = running.map(j =>
+        th.fg("text", `${j.label} ${formatDuration(Date.now() - j.startedAt)}`)
+      );
+      let line = ` ${spinner} bg: ${runningParts.join(", ")}`;
+
+      if (hasRecent) {
+        line += ` · ${summarizeCompleted(th, doneCount, failCount, killCount)}`;
+      }
+
+      ctx.ui.setWidget("bg-run", [line]);
+    } else {
+      ctx.ui.setWidget("bg-run", [` bg: ${summarizeCompleted(th, doneCount, failCount, killCount)}`]);
     }
-    for (const j of recent) {
-      const icon = j.status === "completed" ? th.fg("success", "✅") : th.fg("error", j.status === "killed" ? "🔴" : "❌");
-      lines.push(` ${icon} ${th.fg("dim", j.label.slice(0, 25).padEnd(25))} ${th.fg("dim", formatDuration((j.endedAt ?? Date.now()) - j.startedAt))}`);
-    }
-    ctx.ui.setWidget("bg-run", lines);
 
     const n = running.length;
-    ctx.ui.setStatus("bg-run", n === 0 ? undefined : n === 1 ? "🏃 1 bg job" : `🏃 ${n} bg jobs`);
+    ctx.ui.setStatus("bg-run", n === 0 ? undefined : n === 1 ? "1 bg job" : `${n} bg jobs`);
   }
 
   function start(getJobs: () => Job[], ctx: WidgetContext): void {
@@ -70,4 +94,12 @@ export function createWidget(completedTtlMs: number) {
   }
 
   return { refresh, start, stop };
+}
+
+function summarizeCompleted(th: { fg: (c: string, t: string) => string }, done: number, fail: number, kill: number): string {
+  const parts: string[] = [];
+  if (done > 0) parts.push(th.fg("success", `${done} done`));
+  if (fail > 0) parts.push(th.fg("error", `${fail} failed`));
+  if (kill > 0) parts.push(th.fg("dim", `${kill} killed`));
+  return parts.join(" · ");
 }

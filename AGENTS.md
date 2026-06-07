@@ -15,9 +15,29 @@ Pi extension for background process management. Provides `bg_run`, `bg_list`, `b
 
 1. **Job ID format**: `bg_<random8>` — shorter than timestamped IDs, still unique
 2. **Notification always triggers agent**: `triggerTurn: true` on completion — agent reads log automatically
-3. **PID poll as fallback**: `child.on("close")` is primary, PID poll every `widgetRefreshMs` is backup for detached processes
-4. **Sidecar persistence**: `jobs.json` in run dir (`/tmp/bg-run/<sessionId>/`) — enables recovery across session restarts
-5. **Settings via Pi config**: `bgRun` key in settings.json, merged with hardcoded defaults
+3. **Steer delivery mode**: `deliverAs: "steer"` ensures notifications arrive after the current tool call, not after the entire agent turn. This minimizes delay when the agent is busy.
+4. **Deferred child unref**: `child.unref()` is called inside the `close`/`error` handler, not immediately after spawn. Keeping the child ref active ensures libuv polls the child handle every event loop iteration, so `close` events fire in ~1-5ms instead of being delayed by an unref'd handle.
+5. **PID poll as fallback**: `child.on("close")` is primary (near-instant with deferred unref), PID poll is backup for edge cases where the close event doesn't fire.
+6. **Sidecar persistence**: `jobs.json` in run dir (`/tmp/bg-run/<sessionId>/`) — enables recovery across session restarts
+7. **Settings via Pi config**: `bgRun` key in settings.json, merged with hardcoded defaults
+
+## Known Limitations
+
+### Notification delay during tool calls
+
+Notifications are delivered via `pi.sendMessage({ deliverAs: "steer" })`. Pi's messaging model cannot interrupt a running tool call. If the agent is executing a long tool (e.g., `bash` with a 10-second command), notifications queue and deliver after that tool call completes.
+
+This is a **Pi framework limitation**, not a `pi-bg-run` bug. The delivery timeline is:
+
+| Agent state | Notification delivery |
+|---|---|
+| Idle | Immediately (triggers new turn) |
+| Running tool call | After current tool call finishes |
+| LLM streaming | After current turn finishes |
+
+### No cross-session notifications
+
+Each `JobManager` is session-scoped. Notifications only reach the Pi session that spawned the job. If the session closes and a new one starts, the new session's `init()` recovers jobs from the sidecar, but completion notifications for jobs that finished during the gap are lost.
 
 ## Testing
 

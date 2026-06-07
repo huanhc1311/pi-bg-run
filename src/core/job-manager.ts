@@ -16,6 +16,7 @@ export function createJobManager(deps: JobManagerDeps) {
   const killedIds = new Set<string>();
   let pi: any = null;
   let ctx: any = null;
+  let activeSessions = 0;
 
   function autoLabel(command: string): string {
     const t = command.trim().replace(/\s+/g, " ");
@@ -56,8 +57,14 @@ export function createJobManager(deps: JobManagerDeps) {
     };
     jobs.set(id, job);
     unwatchFns.set(id, deps.monitor.watch(id, result.pid, () => onExit(id, 0)));
-    result.child.on?.("close", (code: number | null) => onExit(id, code));
-    result.child.on?.("error", () => onExit(id, 1));
+    result.child.on?.("close", (code: number | null) => {
+      result.child.unref();
+      onExit(id, code);
+    });
+    result.child.on?.("error", () => {
+      result.child.unref();
+      onExit(id, 1);
+    });
     deps.persistence.save(Array.from(jobs.values()), sidecarPath());
     return { job };
   }
@@ -116,7 +123,19 @@ export function createJobManager(deps: JobManagerDeps) {
   function init(piRef: any, ctxRef: any) {
     pi = piRef;
     ctx = ctxRef;
-    require("node:fs").mkdirSync(deps.config.runDir, { recursive: true });
+    activeSessions++;
+    const fs = require("node:fs");
+    fs.mkdirSync(deps.config.runDir, { recursive: true });
+
+    // GC: remove stale project dirs across all projects
+    deps.persistence.gc("/tmp/bg-run", deps.config.completedTtlMs);
+
+    // Clean stale logs and entries for this project's completed jobs
+    const preExisting = deps.persistence.load(sidecarPath());
+    const preRecovered = deps.persistence.recover(preExisting);
+    deps.persistence.cleanLogs(preRecovered, deps.config.completedTtlMs, sidecarPath());
+    deps.persistence.cleanDir(deps.config.runDir);
+
     const loaded = deps.persistence.load(sidecarPath());
     const recovered = deps.persistence.recover(loaded);
     for (const job of recovered) {
@@ -129,22 +148,33 @@ export function createJobManager(deps: JobManagerDeps) {
     deps.widget.start(() => Array.from(jobs.values()), ctx);
   }
 
+  /** Attach an additional session to this project's manager */
+  function attach(piRef: any, ctxRef: any) {
+    pi = piRef;
+    ctx = ctxRef;
+    activeSessions++;
+    deps.widget.start(() => Array.from(jobs.values()), ctx);
+  }
+
+  /** Detach a session — stop widget but keep jobs alive for other sessions */
+  function detach(_ctxRef: any) {
+    activeSessions = Math.max(0, activeSessions - 1);
+    deps.widget.stop();
+    if (activeSessions === 0 && pi) {
+      deps.notifier.flush(pi, true);
+    }
+  }
+
   function shutdown() {
-    let killed = 0;
     for (const [id, job] of jobs) {
-      if (job.status === "running") { killedIds.add(id); deps.killer.kill(job.pid, deps.config.killTimeoutMs); killed++; }
+      if (job.status === "running") { killedIds.add(id); deps.killer.kill(job.pid, deps.config.killTimeoutMs); }
     }
     deps.widget.stop();
     deps.monitor.clearAll();
     for (const unwatch of unwatchFns.values()) unwatch();
     unwatchFns.clear();
     if (pi) deps.notifier.flush(pi, true);
-    if (killed > 0) {
-      setTimeout(() => {
-        try { require("node:fs").rmSync(deps.config.runDir, { recursive: true, force: true }); } catch {}
-      }, 15_000);
-    }
   }
 
-  return { jobs, spawn, kill, list, init, shutdown };
+  return { jobs, spawn, kill, list, init, attach, detach, shutdown };
 }

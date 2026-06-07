@@ -66,6 +66,16 @@ Add to `.pi/settings.json` or `~/.pi/agent/settings.json`:
 | `widgetRefreshMs` | 3000 | Base widget refresh interval (auto-adapts to 500ms when jobs are running) |
 | `killTimeoutMs` | 10000 (10s) | Time before SIGKILL escalation after SIGTERM |
 
+## Notification Delivery Model
+
+When a background job completes, `pi-bg-run` uses `pi.sendMessage()` with `deliverAs: "steer"` and `triggerTurn: true`. This means:
+
+- **Agent idle**: Notification triggers a new agent turn immediately.
+- **Agent running a tool call**: Notification is queued and delivered **after the current tool call finishes**, before the next LLM call. There is no delay beyond the current tool call's remaining duration.
+- **Multiple jobs completing while agent is busy**: Each notification is delivered as a separate steer message, one after each tool call boundary.
+
+**Known limitation**: Notifications cannot interrupt a running tool call. If the agent is executing a long-running tool (e.g., a slow `bash` command), all pending notifications wait until that tool call completes. This is an architectural constraint of Pi's message delivery model, not `pi-bg-run` itself.
+
 ## Architecture
 
 ```
@@ -80,7 +90,7 @@ src/
     process-killer.ts
     persistence.ts
   ui/
-    notifier.ts      # Batched notifications
+    notifier.ts      # Batched notifications (deliverAs: steer)
     widget.ts        # Braille spinner, adaptive refresh
     panel.ts         # TUI panel component
   tools/

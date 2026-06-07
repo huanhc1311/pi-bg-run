@@ -52,7 +52,7 @@ export function createNotifier() {
     try {
       pi.sendMessage(
         { customType: "bg-run-notify", content: message, display: true },
-        { deliverAs: "followUp", triggerTurn: true },
+        { deliverAs: "steer", triggerTurn: true },
       );
     } catch { /* pi may be shutting down */ }
   }

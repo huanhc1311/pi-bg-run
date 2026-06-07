@@ -2,7 +2,7 @@
 set -euo pipefail
 
 EXT_DIR="$HOME/.pi/agent/extensions"
-LINK_NAME="$EXT_DIR/pi-bg-run"
+DEST="$EXT_DIR/pi-bg-run"
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OLD_FILE="$EXT_DIR/bg-run.ts"
 
@@ -13,15 +13,15 @@ if [[ "${1:-}" == "--undeploy" ]]; then
 fi
 
 if [[ "$UNDEPLOY" == true ]]; then
-  echo "🗑️  Removing pi-bg-run extension..."
-  if [[ -L "$LINK_NAME" ]]; then
-    rm "$LINK_NAME"
-    echo "✅ Removed symlink: $LINK_NAME"
-  elif [[ -d "$LINK_NAME" ]]; then
-    rm -rf "$LINK_NAME"
-    echo "✅ Removed directory: $LINK_NAME"
+  echo "Removing pi-bg-run extension..."
+  if [[ -L "$DEST" ]]; then
+    rm "$DEST"
+    echo "Removed symlink: $DEST"
+  elif [[ -d "$DEST" ]]; then
+    rm -rf "$DEST"
+    echo "Removed directory: $DEST"
   else
-    echo "⚠️  Not found: $LINK_NAME"
+    echo "Not found: $DEST"
   fi
   echo ""
   echo "Run /reload in Pi to apply changes."
@@ -29,31 +29,31 @@ if [[ "$UNDEPLOY" == true ]]; then
 fi
 
 # Deploy
-echo "🚀 Deploying pi-bg-run extension..."
+echo "Deploying pi-bg-run extension..."
 
-# Check project has node_modules
-if [[ ! -d "$PROJECT_DIR/node_modules" ]]; then
-  echo "📦 Installing dependencies..."
-  cd "$PROJECT_DIR" && npm install
+# Verify build exists
+if [[ ! -f "$PROJECT_DIR/dist/index.js" ]]; then
+  echo "Error: dist/index.js not found. Run 'npm run build' first."
+  exit 1
 fi
 
 # Remove old single-file extension if it exists
 if [[ -f "$OLD_FILE" ]]; then
-  echo "⚠️  Found old extension: $OLD_FILE"
+  echo "Found old extension: $OLD_FILE"
   rm "$OLD_FILE"
-  echo "   Removed old extension."
 fi
 
 # Remove existing symlink/directory if exists
-if [[ -L "$LINK_NAME" ]]; then
-  rm "$LINK_NAME"
-elif [[ -d "$LINK_NAME" ]]; then
-  rm -rf "$LINK_NAME"
+if [[ -L "$DEST" ]]; then
+  rm "$DEST"
+elif [[ -d "$DEST" ]]; then
+  rm -rf "$DEST"
 fi
 
-# Create symlink
-ln -s "$PROJECT_DIR" "$LINK_NAME"
+# Copy built file only
+mkdir -p "$DEST"
+cp "$PROJECT_DIR/dist/index.js" "$DEST/index.js"
 
-echo "✅ Symlinked: $LINK_NAME → $PROJECT_DIR"
+echo "Deployed: $DEST/index.js"
 echo ""
 echo "Run /reload in Pi to load the extension."
