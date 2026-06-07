@@ -13,7 +13,7 @@
     "undeploy": "bash scripts/deploy.sh --undeploy"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./index.ts"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
