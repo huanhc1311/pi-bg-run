@@ -42,7 +42,18 @@ Press `/bg` in Pi TUI to open the interactive jobs panel:
 - `k` — Kill (press twice to confirm)
 - `q` / `Esc` — Close panel
 
-Running jobs show animated braille spinners (`⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷`), staggered per job for visual variety.
+## Widget
+
+The inline widget shows a compact single-line status above the editor:
+
+```
+ ✶ bg: build 2m30s, train 5m12s · 3 done · 1 failed
+```
+
+- **Running**: Star spinner (✶) + job names with elapsed time
+- **Completed**: Collapsed summary (`N done · N failed · N killed`)
+- **Auto-dismiss**: Widget clears 10s after all jobs finish
+- **No stale data**: Only counts recent jobs within TTL window
 
 ## Configuration
 
@@ -52,7 +63,7 @@ Add to `.pi/settings.json` or `~/.pi/agent/settings.json`:
 {
   "bgRun": {
     "maxConcurrentJobs": 10,
-    "completedTtlMs": 300000,
+    "completedTtlMs": 604800000,
     "widgetRefreshMs": 3000,
     "killTimeoutMs": 10000
   }
@@ -62,7 +73,7 @@ Add to `.pi/settings.json` or `~/.pi/agent/settings.json`:
 | Setting | Default | Description |
 |---|---|---|
 | `maxConcurrentJobs` | 10 | Maximum simultaneous background jobs |
-| `completedTtlMs` | 300000 (5 min) | How long completed/failed jobs stay visible in list and widget |
+| `completedTtlMs` | 604800000 (7 days) | How long completed job data is kept before garbage collection |
 | `widgetRefreshMs` | 3000 | Base widget refresh interval (auto-adapts to 500ms when jobs are running) |
 | `killTimeoutMs` | 10000 (10s) | Time before SIGKILL escalation after SIGTERM |
 
@@ -76,6 +87,22 @@ When a background job completes, `pi-bg-run` uses `pi.sendMessage()` with `deliv
 
 **Known limitation**: Notifications cannot interrupt a running tool call. If the agent is executing a long-running tool (e.g., a slow `bash` command), all pending notifications wait until that tool call completes. This is an architectural constraint of Pi's message delivery model, not `pi-bg-run` itself.
 
+## Storage
+
+Job data is stored under `/tmp/bg-run/` keyed by **project path hash** — all sessions working on the same project share the same directory:
+
+```
+/tmp/bg-run/<project-hash>/
+├── jobs.json          # Job metadata (sidecar)
+├── bg_abc12345.log    # Job output logs
+└── bg_def67890.log
+```
+
+**Garbage collection** runs on session start:
+- Removes log files and their entries from `jobs.json` for completed jobs older than `completedTtlMs`
+- Removes empty project directories
+- Skips directories with running jobs
+
 ## Architecture
 
 ```
@@ -88,10 +115,10 @@ src/
     process-spawner.ts
     process-monitor.ts
     process-killer.ts
-    persistence.ts
+    persistence.ts   # Sidecar JSON + GC
   ui/
     notifier.ts      # Batched notifications (deliverAs: steer)
-    widget.ts        # Braille spinner, adaptive refresh
+    widget.ts        # Star spinner, single-line compact display
     panel.ts         # TUI panel component
   tools/
     bg-run.ts
@@ -103,6 +130,8 @@ src/
 
 ```bash
 npm install
+npm run build         # Vite production build
+npm run deploy        # Build + deploy to ~/.pi/agent/extensions/
 npm test              # Run all tests
 npm run test:unit     # Unit tests only
 npm run test:integration  # Integration tests only
