@@ -80,6 +80,20 @@ describe("JobManager", () => {
     expect(deps.widget.refresh).toHaveBeenCalled();
   });
 
+  it("onExit sets notifiedAt when pi is available", () => {
+    const deps = mockDeps();
+    const mgr = createJobManager(deps as any);
+    const mockPi = { sendMessage: vi.fn() };
+    const mockCtx = { hasUI: false, ui: { theme: { fg: (_: string, t: string) => t }, setWidget: vi.fn(), setStatus: vi.fn() } };
+    mgr.init(mockPi, mockCtx);
+    mgr.spawn("cmd", "test");
+    const onExit = deps.monitor.watch.mock.calls[0][2] as () => void;
+    onExit();
+    const job = Array.from(mgr.jobs.values())[0];
+    expect(job.notifiedAt).toBeGreaterThan(0);
+    expect(deps.persistence.save).toHaveBeenCalledTimes(4); // init + spawn + exit + post-notify
+  });
+
   it("onExit marks killed jobs correctly", () => {
     const deps = mockDeps();
     const mgr = createJobManager(deps as any);
@@ -107,7 +121,7 @@ describe("JobManager", () => {
   it("init recovers from sidecar and starts widget", () => {
     const deps = mockDeps();
     deps.persistence.load = vi.fn(() => [
-      { id: "bg_recovered", label: "old", command: "cmd", logPath: "/tmp/old.log", pid: 999, status: "running", exitCode: null, startedAt: 1000, endedAt: null },
+      { id: "bg_recovered", label: "old", command: "cmd", logPath: "/tmp/old.log", pid: 999, status: "running", exitCode: null, startedAt: 1000, endedAt: null, notifiedAt: null },
     ]);
     deps.persistence.recover = vi.fn((jobs: Job[]) => jobs);
     const mgr = createJobManager(deps as any);

@@ -23,7 +23,7 @@ export function createJobManager(deps: JobManagerDeps) {
   }
 
   function emptyJob(): Job {
-    return { id: "", label: "", command: "", logPath: "", pid: 0, status: "failed", exitCode: null, startedAt: 0, endedAt: null };
+    return { id: "", label: "", command: "", logPath: "", pid: 0, status: "failed", exitCode: null, startedAt: 0, endedAt: null, notifiedAt: null };
   }
 
   function sidecarPath(): string {
@@ -52,7 +52,7 @@ export function createJobManager(deps: JobManagerDeps) {
 
     const job: Job = {
       id, label: label || autoLabel(command), command, logPath: result.logPath, pid: result.pid,
-      status: "running", exitCode: null, startedAt: Date.now(), endedAt: null,
+      status: "running", exitCode: null, startedAt: Date.now(), endedAt: null, notifiedAt: null,
     };
     jobs.set(id, job);
     unwatchFns.set(id, deps.monitor.watch(id, result.pid, () => onExit(id, 0)));
@@ -106,7 +106,11 @@ export function createJobManager(deps: JobManagerDeps) {
     else { job.status = code === 0 ? "completed" : "failed"; }
     deps.persistence.save(Array.from(jobs.values()), sidecarPath());
     deps.widget.refresh(Array.from(jobs.values()), ctx);
-    if (pi) deps.notifier.notify(job, pi);
+    if (pi) {
+      job.notifiedAt = Date.now();
+      deps.persistence.save(Array.from(jobs.values()), sidecarPath());
+      deps.notifier.notify(job, pi);
+    }
   }
 
   function init(piRef: any, ctxRef: any) {

@@ -10,6 +10,7 @@ export interface Job {
   exitCode: number | null;
   startedAt: number;
   endedAt: number | null;
+  notifiedAt: number | null;
 }
 
 export interface BgRunConfig {
