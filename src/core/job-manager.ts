@@ -116,6 +116,7 @@ export function createJobManager(deps: JobManagerDeps) {
   function init(piRef: any, ctxRef: any) {
     pi = piRef;
     ctx = ctxRef;
+    require("node:fs").mkdirSync(deps.config.runDir, { recursive: true });
     const loaded = deps.persistence.load(sidecarPath());
     const recovered = deps.persistence.recover(loaded);
     for (const job of recovered) {
